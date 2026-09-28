@@ -1,0 +1,179 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Machine {
+  id                  String             @id @default(uuid())
+  assetTag            String             @unique
+  name                String
+  model               String
+  manufacturer        String
+  location            String
+  installationDate    DateTime
+  operatingHours     Int                @default(0)
+  status              String             @default("OPERATIONAL") // OPERATIONAL, WARNING, CRITICAL, MAINTENANCE
+  lastMaintenanceDate DateTime?
+  currentIssue        String?
+  incidentCount       Int                @default(0)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  incidents           Incident[]
+  observations        Observation[]
+  interventions       Intervention[]
+  outcomes            Outcome[]
+  replacements        ReplacementHistory[]
+  events              MaintenanceEvent[]
+  memories            MemoryItem[]
+}
+
+model Incident {
+  id               String          @id @default(uuid())
+  machineId        String
+  incidentNumber   String          @unique
+  reportedAt       DateTime        @default(now())
+  severity         String          @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  description      String
+  symptoms         String          // Stored as JSON string array
+  measurements     String          // Stored as JSON object string
+  initialDiagnosis String?
+  status           String          @default("OPEN") // OPEN, IN_PROGRESS, RESOLVED, RECURRED
+  resolvedAt       DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  machine          Machine         @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  observations     Observation[]
+  interventions    Intervention[]
+  outcomes         Outcome[]
+  replacements     ReplacementHistory[]
+  events           MaintenanceEvent[]
+  memories         MemoryItem[]
+}
+
+model Technician {
+  id              String               @id @default(uuid())
+  name            String
+  role            String               @default("Technician")
+  experienceYears Int                  @default(5)
+  createdAt       DateTime             @default(now())
+
+  observations    Observation[]
+  interventions   Intervention[]
+  replacements    ReplacementHistory[]
+  events          MaintenanceEvent[]
+}
+
+model Observation {
+  id           String      @id @default(uuid())
+  incidentId   String
+  machineId    String
+  technicianId String
+  observation  String
+  measurement  Float?
+  unit         String?
+  context      String?
+  createdAt    DateTime    @default(now())
+
+  incident     Incident    @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  machine      Machine     @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  technician   Technician  @relation(fields: [technicianId], references: [id])
+}
+
+model Intervention {
+  id           String      @id @default(uuid())
+  incidentId   String
+  machineId    String
+  technicianId String
+  type         String      // ALIGNMENT, BEARING_REPLACEMENT, SEAL_REPLACEMENT, LUBRICATION, IMPELLER_CLEANING, MOTOR_REWIND
+  description  String
+  partsUsed    String      // JSON string array of part IDs/names
+  startedAt    DateTime
+  completedAt  DateTime?
+  result       String      @default("UNKNOWN") // SUCCESSFUL, PARTIALLY_SUCCESSFUL, TEMPORARY_IMPROVEMENT, FAILED, UNKNOWN
+  notes        String?
+  createdAt    DateTime    @default(now())
+
+  incident     Incident    @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  machine      Machine     @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  technician   Technician  @relation(fields: [technicianId], references: [id])
+  outcomes     Outcome[]
+}
+
+model Outcome {
+  id                  String        @id @default(uuid())
+  incidentId          String
+  interventionId      String
+  machineId           String
+  resolved            Boolean       @default(true)
+  resolutionNotes     String
+  finalDiagnosis      String
+  replacedComponent   String?
+  timeUntilRecurrence Int?          // Days until problem returned (null if resolved long-term)
+  createdAt           DateTime      @default(now())
+
+  incident            Incident      @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  intervention        Intervention  @relation(fields: [interventionId], references: [id], onDelete: Cascade)
+  machine             Machine       @relation(fields: [machineId], references: [id], onDelete: Cascade)
+}
+
+model Part {
+  id           String               @id @default(uuid())
+  partNumber   String               @unique
+  partName     String
+  manufacturer String
+  category     String               // BEARINGS, SEALS, IMPELLERS, MOTORS, VALVES, COUPLINGS
+
+  replacements ReplacementHistory[]
+}
+
+model ReplacementHistory {
+  id              String      @id @default(uuid())
+  machineId       String
+  incidentId      String
+  partId          String
+  replacementDate DateTime    @default(now())
+  technicianId    String
+  outcome         String      // SUCCESSFUL, FAILED, RECURRED
+
+  machine         Machine     @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  incident        Incident    @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  part            Part        @relation(fields: [partId], references: [id])
+  technician      Technician  @relation(fields: [technicianId], references: [id])
+}
+
+model MaintenanceEvent {
+  id           String      @id @default(uuid())
+  machineId    String
+  eventType    String      // INSTALLATION, ROUTINE_INSPECTION, INCIDENT, INTERVENTION, UPGRADE
+  description  String
+  date         DateTime
+  technicianId String?
+  incidentId   String?
+  createdAt    DateTime    @default(now())
+
+  machine      Machine     @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  technician   Technician? @relation(fields: [technicianId], references: [id])
+  incident     Incident?   @relation(fields: [incidentId], references: [id])
+}
+
+model MemoryItem {
+  id             String    @id @default(uuid())
+  hindsightId    String?   @unique
+  machineId      String
+  incidentId     String?
+  category       String    // MACHINE_FACT, INCIDENT_EXPERIENCE, TECHNICIAN_OBSERVATION, INTERVENTION_OUTCOME, HISTORICAL_PATTERN
+  content        String
+  outcomeType    String?   // FAILED, TEMPORARY_IMPROVEMENT, PARTIAL_SUCCESS, SUCCESSFUL, UNKNOWN
+  relevanceScore Float     @default(1.0)
+  source         String    @default("Incident Record")
+  createdAt      DateTime  @default(now())
+
+  machine        Machine   @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  incident       Incident? @relation(fields: [incidentId], references: [id])
+}
